@@ -1,0 +1,13 @@
+name = "FebusTools"
+uuid = "4ada55c4-7f3f-4c61-9ab9-dcbd632595bb"
+authors = ["Andy Nowacki <a.nowacki@leeds.ac.uk> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
