@@ -205,15 +205,14 @@ function read_hdf5(file;
         nsamples = length(block_num1:block_num2)*nblocks
 
         # Cut out data
-        data = let d = zone["StrainRate"]
-            permutedims(
-                reshape(
-                    d[x_ind1:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2],
-                    nchannels,
-                    :
-                )
+        raw_data = zone["StrainRate"]
+        data = permutedims(
+            reshape(
+                raw_data[x_ind1:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2],
+                nchannels,
+                :
             )
-        end
+        )
 
         if size(data) != (nsamples, nchannels)
             error("error in calculating data slice.  Expected shape ",
