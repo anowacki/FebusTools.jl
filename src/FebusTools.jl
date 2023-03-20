@@ -27,7 +27,7 @@ FebusData(; data, dates, times, distances, metadata) =
     FebusData(data, dates, times, distances, metadata)
 
 """
-    read_hdf5(file; xlim=(-Inf, Inf), tlim=($(typemin(DateTime)), $(typemax(DateTime))), blocks, zones=(>=(1)), sources=(>=(1))) -> ::FebusData
+    read_hdf5(file; xlim=(-Inf, Inf), xdecimate=1, tlim=($(typemin(DateTime)), $(typemax(DateTime))), blocks, zones=(>=(1)), sources=(>=(1))) -> ::FebusData
 
 Read strain or strain rate data from `file` on disk.  By default, all data are
 read into memory.
@@ -37,6 +37,7 @@ lie between `xlim[begin]` and `xlim[end]` will be read.  Likewise, only blocks w
 times between `tlim[begin]` and `tlim[end]` are read.  Note that whole blocks
 (usuall of duration 1 s) are always read, so the stand and end times of the
 returned data can be respectively before and after `xlim[begin]` and `xlim[end]`.
+To read only the `n`th channel, set `xdecimate=n`.
 
 Instead of `tlim`, you can also choose which blocks are read in with the
 `blocks` keyword argument, which again takes two items, the start and end
@@ -57,6 +58,7 @@ source a set of source numbers.
 function read_hdf5(file;
     tlim::Union{Tuple,AbstractArray,Nothing}=nothing,
     xlim::Union{Tuple,AbstractArray}=(-Inf, Inf),
+    xdecimate::Integer=1,
     blocks::Union{Tuple{Integer,Integer},AbstractArray{<:Integer},Nothing}=nothing,
     zones=(>=(1)),
     sources=(>=(1))
@@ -69,6 +71,9 @@ function read_hdf5(file;
     end
     if length(xlim) != 2
         throw(ArgumentError("`xlim` must contain two items"))
+    end
+    if xdecimate < 1
+        throw(ArgumentError("`xdecimate` must be 1 or more"))
     end
 
     # Allow either time limiting by block indices or date, but not both
@@ -184,7 +189,7 @@ function read_hdf5(file;
             @warn "No channels between $x1 and $x2 m in file '$file'"
             return FebusData(Matrix{Float32}(undef, 0, 0), [], [], distances, metadata)
         end
-        nchannels = length(x_ind1:x_ind2)
+        nchannels = length(x_ind1:xdecimate:x_ind2)
 
         # Calculate which block sample numbers we need to avoid overlap (starting at 0)
         block_num1, block_num2 = metadata[:Extent][3], metadata[:Extent][4]
@@ -208,7 +213,7 @@ function read_hdf5(file;
         raw_data = zone["StrainRate"]
         data = permutedims(
             reshape(
-                raw_data[x_ind1:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2],
+                raw_data[x_ind1:xdecimate:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2],
                 nchannels,
                 :
             )
@@ -221,7 +226,7 @@ function read_hdf5(file;
 
         block_dates = block_start_dates[t_ind1:t_ind2]
         times = (block_num1 .+ (0:(nsamples - 1))) .* sampling_interval
-        cut_distances = distances[x_ind1:x_ind2]
+        cut_distances = distances[x_ind1:xdecimate:x_ind2]
 
         FebusData(data, block_dates, times, cut_distances, metadata)
     end
