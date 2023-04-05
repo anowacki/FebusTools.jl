@@ -211,13 +211,26 @@ function read_hdf5(file;
 
         # Cut out data
         raw_data = zone["StrainRate"]
-        data = permutedims(
-            reshape(
-                raw_data[x_ind1:xdecimate:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2],
-                nchannels,
-                :
-            )
-        )
+        # Reading becomes slow when xdecimate is small, because
+        # it seems HDF5 makes lots of reads (perhaps one for each
+        # slice of the first dimension).  If `xdecimate`` is small,
+        # then chunk the reads up along a more sensible dimension,
+        # and decimate the first afterwards.
+        if xdecimate == 1 || xdecimate >= 50
+            unshaped_data =
+                raw_data[x_ind1:xdecimate:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2]
+            data = permutedims(reshape(unshaped_data, nchannels, :))
+        else
+            # Avoid slowdown for small decimation values
+            # by just reading it all in then removing the channels
+            # we don't want.
+            # FIXME: Implement a better time-chunked strategy as this
+            #        requires us to read it all into memory.
+            unshaped_data =
+                raw_data[x_ind1:x_ind2, block_ind1:block_ind2, t_ind1:t_ind2]
+            data = permutedims(reshape(unshaped_data[1:xdecimate:end,:,:],
+                nchannels, :))
+        end
 
         if size(data) != (nsamples, nchannels)
             error("error in calculating data slice.  Expected shape ",
