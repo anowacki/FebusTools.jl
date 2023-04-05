@@ -9,6 +9,9 @@ export
     read_hdf5
 
 
+"Element type of Febus A1 data"
+const _A1_ELTYPE = Float32
+
 struct FebusData{M,Da,Ti,Di}
     "Matrix of strain or strain rate with dimensions (time, distance)"
     data::M
@@ -61,7 +64,8 @@ function read_hdf5(file;
     xdecimate::Integer=1,
     blocks::Union{Tuple{Integer,Integer},AbstractArray{<:Integer},Nothing}=nothing,
     zones=(>=(1)),
-    sources=(>=(1))
+    sources=(>=(1)),
+    header_only::Bool=false
 )
     # Requirement to pass two items and not a range or filtering function is
     # because `HDF5` only slices with continuous ranges, which we can construct
@@ -161,13 +165,18 @@ function read_hdf5(file;
         # Calculate which blocks to include
         total_nblocks = size(zone["StrainRate"], 3)
 
+        # Just return metadata if requested
+        if header_only
+            return FebusData(Matrix{_A1_ELTYPE}(undef, 0, 0), [], [], distances, metadata)
+        end
+
         if !isnothing(tlim)
             cut1, cut2 = tlim
             t_ind1 = findfirst(x -> cut1 <= x <= cut2, block_start_dates)
             t_ind2 = findlast(x -> cut1 <= x <= cut2, block_start_dates)
             if isnothing(t_ind1)
                 @warn "No blocks between $cut1 and $cut2 in file '$file'"
-                return FebusData(Matrix{Float32}(undef, 0, 0), [], [], distances, metadata)
+                return FebusData(Matrix{_A1_ELTYPE}(undef, 0, 0), [], [], distances, metadata)
             end
         else
             t_ind1, t_ind2 = blocks
@@ -187,7 +196,7 @@ function read_hdf5(file;
         x_ind2 = findlast(x -> x1 <= x <= x2, distances)
         if isnothing(x_ind1)
             @warn "No channels between $x1 and $x2 m in file '$file'"
-            return FebusData(Matrix{Float32}(undef, 0, 0), [], [], distances, metadata)
+            return FebusData(Matrix{_A1_ELTYPE}(undef, 0, 0), [], [], distances, metadata)
         end
         nchannels = length(x_ind1:xdecimate:x_ind2)
 
