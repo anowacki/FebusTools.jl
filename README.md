@@ -15,3 +15,9 @@ At present, only HDF5 files written by the Febus A1 are read.
 The code is preliminary and in draft form, without tests or
 documentation.  You are free to use it, but I cannot offer any
 guarantees of its continued maintenance.
+
+## Disclaimer
+Although designed to deal with data from Febus equipment, the code in
+this repository is not endored by Febus and was developed independently
+from them.  Febus cannot be held liable for any problems associated with
+using this software.
