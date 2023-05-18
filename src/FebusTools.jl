@@ -2,7 +2,6 @@ module FebusTools
 
 using Dates: Dates, DateTime, Second, Millisecond, Microsecond, datetime2unix, unix2datetime
 using HDF5: attrs, h5open
-using NanoDates: NanoDate
 using Statistics: mean
 
 export
