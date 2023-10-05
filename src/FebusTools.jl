@@ -111,7 +111,6 @@ function read_hdf5(file;
         # Block rate mHz and in-block sample spacing (ms)
         sampling_interval = zone_atts["Spacing"][2]/1000
         sampling_rate = 1000/zone_atts["Spacing"][2]
-        sampling_interval_µs = Microsecond(zone_atts["BlockRate"][1]//Int(zone_atts["Spacing"][2]))
 
         # Get attributes for the first zone and convert to default types
         for (k, v) in zone_atts
