@@ -29,7 +29,7 @@ FebusData(; data, dates, times, distances, metadata) =
     FebusData(data, dates, times, distances, metadata)
 
 """
-    read_hdf5(file; xlim=(-Inf, Inf), xdecimate=1, tlim=($(typemin(DateTime)), $(typemax(DateTime))), blocks, zones=(>=(1)), sources=(>=(1))) -> ::FebusData
+    read_hdf5(file; xlim=(-Inf, Inf), xdecimate=1, tlim=($(typemin(DateTime)), $(typemax(DateTime))), blocks, zones=(==(1)), sources=(==(1)), version=nothing) -> ::FebusData
 
 Read strain or strain rate data from `file` on disk.  By default, all data are
 read into memory.
@@ -55,17 +55,23 @@ source a set of source numbers.
 
 !!! note
     Currently only the first source of the first zone is read, and an error
-    is thrown if more than one zone or source is present in a file.
+    is thrown if more than one zone or source is present in a file or if
+    anything other than the first zone is requested.  This will change in
+    a breaking update to FebusTools.
 """
 function read_hdf5(file;
     tlim::Union{Tuple,AbstractArray,Nothing}=nothing,
     xlim::Union{Tuple,AbstractArray}=(-Inf, Inf),
     xdecimate::Integer=1,
     blocks::Union{Tuple{Integer,Integer},AbstractArray{<:Integer},Nothing}=nothing,
-    zones=(>=(1)),
-    sources=(>=(1)),
-    header_only::Bool=false
+    zones=(==(1)),
+    sources=(==(1)),
+    header_only::Bool=false,
+    version::Union{Nothing,VersionNumber}=nothing,
 )
+    zones == (==(1)) && sources == (==(1)) ||
+        throw(ArgumentError("zones and sources are not currently supported"))
+
     # Requirement to pass two items and not a range or filtering function is
     # because `HDF5` only slices with continuous ranges, which we can construct
     # from length-2 collections.
@@ -95,6 +101,21 @@ function read_hdf5(file;
         # Get source
         source_key = only(keys(sensor))
         source = sensor[source_key]
+
+        # Get file version, or use the assumed version passed in
+        # There are at least two file versions in the wild; one without a
+        # `"Version"` attribute which we call v1, and one with a
+        # version attribute.  We have seen at least v2.3.21.
+        file_version = if isnothing(version)
+            v = VersionNumber(get(attrs(source), "Version", "1.0.0"))
+            if v < v"1" || v >= v"3"
+                @warn("File version number ($v) is outside expected range for file $file")
+            end
+            v
+        else
+            version
+        end
+
         # Timestamps of start of each block
         block_start_times = source["time"][:]
         block_start_dates = unix2datetime.(block_start_times)
@@ -108,6 +129,15 @@ function read_hdf5(file;
 
         # Derived attributes using raw values
         zone_atts = attrs(zone)
+        # Block overlap in percent
+        block_overlap_percent = if file_version < v"2"
+            # Original files always have complete overlap, per Table 2
+            # of user guide v5.
+            100
+        elseif v"1" < file_version < v"3"
+            Int(only(zone_atts["BlockOverlap"]))
+        end
+        metadata[:BlockOverlap] = block_overlap_percent
         # Block rate mHz and in-block sample spacing (ms)
         sampling_interval = zone_atts["Spacing"][2]/1000
         sampling_rate = 1000/zone_atts["Spacing"][2]
@@ -123,14 +153,15 @@ function read_hdf5(file;
                 val /= 100
             # Rate of block writing
             elseif key == :BlockRate
-                metadata[:BlockLength] = 2000/val
+                # Block rate is in mHz
+                metadata[:BlockLength] = (100 + block_overlap_percent)*10/val
                 metadata[:BlockInterval] = 1000/val
                 # mHz -> Hz
                 val /= 1000
             # Frequency of laser pulses
             elseif key == :PulseRateFreq
                 # mHz -> Hz
-                val = Int(val)/1000
+                val = val/1000
             elseif key == :DataDomain
                 val = Int.(val)
             # Extent of blocks for this zone
@@ -160,8 +191,15 @@ function read_hdf5(file;
         x0::Float64 = metadata[:Origin][1]
         distances = x0 .+ (metadata[:Extent][1]:metadata[:Extent][2]).*metadata[:Spacing][1]
 
+        # Data
+        raw_data = if file_version < v"2"
+            zone["StrainRate"]
+        elseif v"1" < file_version < v"3"
+            zone["Strain Rate [nStrain|s]"]
+        end
+
         # Calculate which blocks to include
-        total_nblocks = size(zone["StrainRate"], 3)
+        total_nblocks = size(raw_data, 3)
 
         # Just return metadata if requested
         if header_only
@@ -217,7 +255,6 @@ function read_hdf5(file;
         nsamples = length(block_num1:block_num2)*nblocks
 
         # Cut out data
-        raw_data = zone["StrainRate"]
         # Reading becomes slow when xdecimate is small, because
         # it seems HDF5 makes lots of reads (perhaps one for each
         # slice of the first dimension).  If `xdecimate`` is small,
