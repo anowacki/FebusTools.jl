@@ -37,7 +37,7 @@ read into memory.
 If `xlim` is given a length-2 collection, then only channels whose distances
 lie between `xlim[begin]` and `xlim[end]` will be read.  Likewise, only blocks with
 times between `tlim[begin]` and `tlim[end]` are read.  Note that whole blocks
-(usuall of duration 1 s) are always read, so the stand and end times of the
+(usually of duration 1 s) are always read, so the stand and end times of the
 returned data can be respectively before and after `xlim[begin]` and `xlim[end]`.
 To read only the `n`th channel, set `xdecimate=n`.
 
@@ -52,6 +52,14 @@ zone to accept.
 
 Likewise, supply a function of the form `f(::Int)::Bool` for `sources` to accept
 source a set of source numbers.
+
+The data type (i.e., strain or strain rate) is recorded in the `:data_type`
+field of the metada dictionary.
+
+By default, the file version is determined from the HDF5 file attributes,
+noting that files without a version attribute are considered to be 'v1'
+files.  Pass a version (e.g., `v"2.1"`) to force the assumption of a
+specific file version when parsing the data.
 
 !!! note
     Currently only the first source of the first zone is read, and an error
@@ -116,9 +124,6 @@ function read_hdf5(file;
             version
         end
 
-        # Timestamps of start of each block
-        block_start_times = source["time"][:]
-        block_start_dates = unix2datetime.(block_start_times)
         # Get zones
         zone_key = only(filter(!=("time"), keys(source)))
         zone = source[zone_key]
@@ -130,11 +135,13 @@ function read_hdf5(file;
         # Derived attributes using raw values
         zone_atts = attrs(zone)
         # Block overlap in percent
-        block_overlap_percent = if file_version < v"2"
+        block_overlap_percent = if file_version < v"2.3.13"
             # Original files always have complete overlap, per Table 2
             # of user guide v5.
             100
-        elseif v"1" < file_version < v"3"
+        elseif file_version >= v"2.3.13"
+            # User guide v10 specifies variable overlap, to a minimum of
+            # 5%
             Int(only(zone_atts["BlockOverlap"]))
         end
         metadata[:BlockOverlap] = block_overlap_percent
@@ -179,6 +186,13 @@ function read_hdf5(file;
             metadata[key] = val
         end
 
+        # Timestamps of each block
+        # For older files, the timestamp was the start of the block.
+        # Files with version >= v2.3.13 have the middle of the block
+        # as the time (per V10 of the manual)
+        block_start_times = source["time"][:] .+ metadata[:Origin][2]/1000
+        block_start_dates = unix2datetime.(block_start_times)
+
         # Number of points per whole block
         metadata[:nsamples_per_block] = whole_extent[4] - whole_extent[3] + 1
         if metadata[:nsamples_per_block] != metadata[:BlockLength]*metadata[:PulseRateFreq]
@@ -191,11 +205,27 @@ function read_hdf5(file;
         x0::Float64 = metadata[:Origin][1]
         distances = x0 .+ (metadata[:Extent][1]:metadata[:Extent][2]).*metadata[:Spacing][1]
 
-        # Data
-        raw_data = if file_version < v"2"
-            zone["StrainRate"]
-        elseif v"1" < file_version < v"3"
-            zone["Strain Rate [nStrain|s]"]
+        # Data.  Take strain if present, otherwise strain rate.
+        raw_data = if file_version < v"2.3.13"
+            if haskey(zone, "Strain")
+                metadata[:data_type] = "strain [nstrain]"
+                zone["Strain"]
+            elseif haskey(zone, "StrainRate")
+                metadata[:data_type] = "strain rate [nstrain/s]"
+                zone["StrainRate"]
+            else
+                error("no known data fields present in file $file")
+            end
+        else
+            if haskey(zone, "Strain [nStrain]")
+                metadata[:data_type] = "strain [nstrain]"
+                zone["Strain [nStrain]"]
+            elseif haskey(zone, "Strain Rate [nStrain|s]")
+                metadata[:data_type] = "strain rate [nstrain/s]"
+                zone["Strain Rate [nStrain|s]"]
+            else
+                error("no known data fields present in file $file")
+            end
         end
 
         # Calculate which blocks to include
